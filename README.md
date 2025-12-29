@@ -1,10 +1,10 @@
 # Synapse - Voice Commander for Test Automation
 
-Voice-controlled orchestration layer for the test automation microservices ecosystem (Scout, Golem, Marker).
+Real-time voice-controlled orchestration layer for the test automation microservices ecosystem using **Gemini Live API**.
 
 ## Overview
 
-Synapse uses Google Gemini LLM to process voice commands and coordinate test automation tasks across multiple microservices:
+Synapse uses Google Gemini Live API for real-time bidirectional voice communication. You speak, the AI listens and responds with voice, then executes test automation tasks:
 
 - **Scout** - Generate test scenarios from frontend code
 - **Golem** - Generate and run Playwright/Robot/Cypress tests
@@ -12,72 +12,114 @@ Synapse uses Google Gemini LLM to process voice commands and coordinate test aut
 
 ## Features
 
-- Voice command recognition (Slovak/English)
-- Natural language intent parsing with Gemini
-- Test scenario dictation
+- **Real-time voice conversation** with Gemini Live API
+- Bidirectional audio - speak and hear responses
+- Natural language understanding (Slovak/English)
+- Tool execution for test automation tasks
 - gRPC communication with microservices
 - Text mode for testing without microphone
 
 ## Requirements
 
 - Python 3.10+ (tested with 3.14)
-- Google Gemini API key
-- Running Scout, Golem, Marker gRPC services
-- PyAudio (optional, only for voice mode)
+- Google API key with Gemini Live API access
+- Running Scout, Golem, Marker gRPC services (for test automation)
 
 ## Installation
 
 ```bash
-# Install core dependencies
+# Install all dependencies (no compilation needed!)
 pip install -r requirements.txt
-
-# For voice mode (optional):
-# Windows: pip install pipwin && pipwin install pyaudio
-# macOS: brew install portaudio && pip install pyaudio
-# Linux: sudo apt-get install portaudio19-dev && pip install pyaudio
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your Gemini API key
+# Edit .env with your GOOGLE_API_KEY
 ```
+
+All dependencies have prebuilt wheels for Windows/macOS/Linux - no Visual C++ Build Tools needed.
 
 ## Usage
 
-### Text Mode (recommended for testing)
+### Live Voice Mode (Gemini Live API)
+```bash
+python main.py live
+```
+- Uses real-time bidirectional audio
+- Model speaks responses back to you
+- **Use headphones** to prevent echo!
+
+### Text Mode
 ```bash
 python main.py text
 ```
 
-### Voice Mode (requires PyAudio)
-```bash
-python main.py voice
-python main.py voice --language en-US
-```
-
 ### Single Command
 ```bash
-python main.py command "Generate test scenarios for C:/path/to/project"
+python main.py command "Generate scenarios for C:/Projects/my-app"
 ```
 
-## Commands (Voice or Text)
+### List Audio Devices
+```bash
+python main.py devices
+```
 
-- "Vygeneruj testovacie scenare pre C:/path/to/project" - Generate test scenarios
-- "Vygeneruj Playwright testy zo scenarios.json" - Generate tests from scenarios
-- "Spusti testy v result/tests proti localhost:4200" - Run tests
-- "Pridaj test ID atributy do C:/path/to/project" - Add test IDs
-- "Nadiktujem scenar: klikni na button a over message" - Dictate a scenario
-- "stop" / "koniec" / "exit" - Exit
+## Voice Commands
+
+Speak naturally in Slovak or English:
+
+- "Vygeneruj testovacie scenare pre C:/Projects/company-angular"
+- "Generate Playwright tests from result/scenarios.json"
+- "Run tests in result/tests against localhost:4200"
+- "Add test IDs to the company-angular project"
+- "Stop" / "Koniec" / "Exit" - End session
 
 ## Architecture
 
 ```
-Synapse (Voice Commander)
-    |
-    +-- VoiceInput (Speech Recognition)
-    +-- CommandParser (Gemini LLM)
-    +-- gRPC Clients
-            |
-            +-- Scout  :50051
-            +-- Golem  :50052
-            +-- Marker :50053
+┌─────────────────────────────────────────────────────────────┐
+│                         SYNAPSE                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ Live Voice  │◄─┼─► Gemini    │──► Tool Handler        │  │
+│  │ (PyAudio)   │  │  Live API   │  │ (gRPC Clients)      │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │  Microservices  │
+                    │  Scout :50051   │
+                    │  Golem :50052   │
+                    │  Marker :50053  │
+                    └─────────────────┘
 ```
+
+## Project Structure
+
+```
+synapse/
+├── main.py           # CLI entry point
+├── config.py         # Configuration
+├── live_voice.py     # Gemini Live API integration
+├── agents.py         # Tool handlers
+├── grpc_clients.py   # Scout/Golem/Marker clients
+├── requirements.txt  # Dependencies
+├── .env.example      # Environment template
+└── README.md         # This file
+```
+
+## Configuration
+
+`.env` file:
+```env
+GOOGLE_API_KEY=your-api-key-here
+GEMINI_LIVE_MODEL=gemini-2.0-flash-live-001
+GEMINI_TEXT_MODEL=gemini-2.0-flash
+
+SCOUT_GRPC_HOST=localhost:50051
+GOLEM_GRPC_HOST=localhost:50052
+MARKER_GRPC_HOST=localhost:50053
+```
+
+## License
+
+MIT

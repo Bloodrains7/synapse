@@ -15,17 +15,14 @@ load_dotenv()
 class Config:
     """Application configuration"""
     # Gemini API
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash-exp"
+    google_api_key: str = ""
+    gemini_live_model: str = "gemini-2.0-flash-live-001"
+    gemini_text_model: str = "gemini-2.0-flash"
 
     # gRPC Services
     scout_grpc_host: str = "localhost:50051"
     golem_grpc_host: str = "localhost:50052"
     marker_grpc_host: str = "localhost:50053"
-
-    # Voice settings
-    voice_language: str = "sk-SK"  # Slovak by default
-    voice_timeout: int = 5  # seconds
 
     # Output
     output_dir: str = "result"
@@ -34,12 +31,12 @@ class Config:
     def load(cls) -> "Config":
         """Load configuration from environment"""
         config = cls()
-        config.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
-        config.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+        config.google_api_key = os.getenv("GOOGLE_API_KEY", "")
+        config.gemini_live_model = os.getenv("GEMINI_LIVE_MODEL", "gemini-2.0-flash-live-001")
+        config.gemini_text_model = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.0-flash")
         config.scout_grpc_host = os.getenv("SCOUT_GRPC_HOST", "localhost:50051")
         config.golem_grpc_host = os.getenv("GOLEM_GRPC_HOST", "localhost:50052")
         config.marker_grpc_host = os.getenv("MARKER_GRPC_HOST", "localhost:50053")
-        config.voice_language = os.getenv("VOICE_LANGUAGE", "sk-SK")
         config.output_dir = os.getenv("OUTPUT_DIR", "result")
         return config
 

@@ -1,29 +1,17 @@
 """
 Synapse AI Agents
-AI agents for voice command processing and test automation using Google Gemini
+Tool handlers for test automation using gRPC services
 """
 
-import google.generativeai as genai
 from typing import Dict, Any
 import json
-import re
 
 from config import config
 from grpc_clients import ScoutClient, GolemClient, MarkerClient
 
 
 # =============================================================================
-# GEMINI SETUP
-# =============================================================================
-
-def setup_gemini():
-    """Configure Gemini API"""
-    genai.configure(api_key=config.gemini_api_key)
-    return genai.GenerativeModel(config.gemini_model)
-
-
-# =============================================================================
-# TOOLS - Direct service calls
+# TOOL IMPLEMENTATIONS
 # =============================================================================
 
 def generate_scenarios(project_path: str) -> Dict[str, Any]:
@@ -34,6 +22,7 @@ def generate_scenarios(project_path: str) -> Dict[str, Any]:
             if result.success:
                 return {
                     "status": "success",
+                    "message": f"Generated {result.data['scenarios_count']} scenarios",
                     "output_path": result.data["output_path"],
                     "scenarios_count": result.data["scenarios_count"]
                 }
@@ -43,7 +32,11 @@ def generate_scenarios(project_path: str) -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-def generate_tests(scenarios_path: str, framework: str = "playwright", base_url: str = "") -> Dict[str, Any]:
+def generate_tests(
+    scenarios_path: str,
+    framework: str = "playwright",
+    base_url: str = ""
+) -> Dict[str, Any]:
     """Generate tests using Golem"""
     try:
         with GolemClient() as client:
@@ -51,6 +44,7 @@ def generate_tests(scenarios_path: str, framework: str = "playwright", base_url:
             if result.success:
                 return {
                     "status": "success",
+                    "message": f"Generated {result.data['tests_count']} tests",
                     "output_dir": result.data["output_dir"],
                     "tests_count": result.data["tests_count"]
                 }
@@ -60,17 +54,25 @@ def generate_tests(scenarios_path: str, framework: str = "playwright", base_url:
         return {"status": "error", "error": str(e)}
 
 
-def run_tests(test_dir: str, base_url: str = "", headed: bool = False) -> Dict[str, Any]:
+def run_tests(
+    test_dir: str,
+    base_url: str = "",
+    headed: bool = False
+) -> Dict[str, Any]:
     """Run tests using Golem"""
     try:
         with GolemClient() as client:
             result = client.run_tests(test_dir, base_url, headed)
             if result.success:
+                passed = result.data["tests_passed"]
+                failed = result.data["tests_failed"]
+                total = result.data["tests_run"]
                 return {
                     "status": "success",
-                    "tests_run": result.data["tests_run"],
-                    "tests_passed": result.data["tests_passed"],
-                    "tests_failed": result.data["tests_failed"]
+                    "message": f"Tests completed: {passed}/{total} passed, {failed} failed",
+                    "tests_run": total,
+                    "tests_passed": passed,
+                    "tests_failed": failed
                 }
             else:
                 return {"status": "error", "error": result.error}
@@ -86,6 +88,7 @@ def add_test_ids(project_path: str) -> Dict[str, Any]:
             if result.success:
                 return {
                     "status": "success",
+                    "message": f"Added {result.data['ids_added']} test IDs to {result.data['files_processed']} files",
                     "files_processed": result.data["files_processed"],
                     "ids_added": result.data["ids_added"]
                 }
@@ -96,200 +99,173 @@ def add_test_ids(project_path: str) -> Dict[str, Any]:
 
 
 # =============================================================================
-# COMMAND PARSER
+# TOOL HANDLER
 # =============================================================================
 
-class CommandParser:
-    """Parses voice commands using Gemini LLM"""
+def handle_tool_call(tool_name: str, args: Dict[str, Any]) -> str:
+    """
+    Handle a tool call from the Gemini model.
+
+    Args:
+        tool_name: Name of the tool to execute
+        args: Arguments for the tool
+
+    Returns:
+        JSON string with the result
+    """
+    tools = {
+        "generate_scenarios": lambda a: generate_scenarios(a.get("project_path", "")),
+        "generate_tests": lambda a: generate_tests(
+            a.get("scenarios_path", ""),
+            a.get("framework", "playwright"),
+            a.get("base_url", "")
+        ),
+        "run_tests": lambda a: run_tests(
+            a.get("test_dir", ""),
+            a.get("base_url", ""),
+            a.get("headed", False)
+        ),
+        "add_test_ids": lambda a: add_test_ids(a.get("project_path", ""))
+    }
+
+    if tool_name in tools:
+        result = tools[tool_name](args)
+        return json.dumps(result, indent=2)
+    else:
+        return json.dumps({"status": "error", "error": f"Unknown tool: {tool_name}"})
+
+
+# =============================================================================
+# TEXT MODE COMMAND PROCESSOR
+# =============================================================================
+
+class CommandProcessor:
+    """Simple command processor for text mode"""
 
     def __init__(self):
-        self.model = setup_gemini()
+        try:
+            from google import genai
+            self.client = genai.Client(api_key=config.google_api_key)
+            self.model = config.gemini_text_model
+        except ImportError:
+            self.client = None
+            self.model = None
 
-    def parse_command(self, command: str) -> Dict[str, Any]:
-        """Parse a voice command and extract intent and parameters"""
-        prompt = f"""Parse this voice command for a test automation system.
+    def process_command(self, command: str) -> str:
+        """Process a text command and return result"""
+        if not self.client:
+            return "Error: google-genai package not installed"
+
+        # Use Gemini to parse the command
+        prompt = f"""Parse this test automation command and extract the intent and parameters.
 
 Command: "{command}"
 
-Extract the following information and return ONLY a valid JSON object:
-{{
-    "intent": "<one of: generate_scenarios, generate_tests, run_tests, add_test_ids, dictate_scenario, unknown>",
-    "project_path": "<path if mentioned, otherwise null>",
-    "scenarios_path": "<scenarios file path if mentioned, otherwise null>",
-    "test_dir": "<test directory if mentioned, otherwise null>",
-    "base_url": "<URL if mentioned, otherwise null>",
-    "framework": "<playwright, robot, cypress, selenium - default: playwright>",
-    "headed": <true or false>,
-    "dictation": "<if dictating a scenario, the scenario text, otherwise null>"
-}}
+Return a JSON object with:
+- intent: one of [generate_scenarios, generate_tests, run_tests, add_test_ids, unknown]
+- project_path: path if mentioned
+- scenarios_path: scenarios file path if mentioned
+- test_dir: test directory if mentioned
+- base_url: URL if mentioned
+- framework: playwright/robot/cypress/selenium (default: playwright)
+- headed: true/false (default: false)
 
 Intent mapping:
-- "vygeneruj scenare", "generate scenarios", "create scenarios" -> generate_scenarios
-- "vygeneruj testy", "generate tests", "create tests" -> generate_tests
-- "spusti testy", "run tests", "execute tests" -> run_tests
-- "pridaj test id", "add test ids", "mark elements" -> add_test_ids
-- "nadiktujem", "dictate scenario", "novy scenar" -> dictate_scenario
-
-Return ONLY the JSON object, no additional text."""
-
-        try:
-            response = self.model.generate_content(prompt)
-            return self._parse_response(response.text)
-        except Exception as e:
-            return {"intent": "unknown", "error": str(e)}
-
-    def _parse_response(self, response: str) -> Dict[str, Any]:
-        """Extract JSON from LLM response"""
-        try:
-            # Try to find JSON in response
-            json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group())
-            # Try parsing the whole response
-            return json.loads(response)
-        except Exception as e:
-            return {"intent": "unknown", "error": f"Parse error: {e}"}
-
-
-# =============================================================================
-# SCENARIO DICTATION
-# =============================================================================
-
-class ScenarioDictator:
-    """Converts dictated scenarios to structured format using Gemini"""
-
-    def __init__(self):
-        self.model = setup_gemini()
-
-    def process_dictation(self, dictation: str, component_name: str = "dictated") -> Dict[str, Any]:
-        """Convert dictated scenario to structured format"""
-        prompt = f"""Convert this dictated test scenario into a structured JSON format.
-
-Dictation: "{dictation}"
-
-Create a test scenario with this EXACT structure (return ONLY valid JSON):
-{{
-    "name": "<short descriptive name>",
-    "description": "<what the test verifies>",
-    "steps": [
-        {{
-            "action": "<click|fill|verify_visible|verify_text|submit>",
-            "selector": "<CSS selector with data-testid>",
-            "value": "<value for fill action, otherwise null>",
-            "description": "<what this step does>"
-        }}
-    ]
-}}
-
-Guidelines:
-- Use data-testid selectors: [data-testid='element-name']
-- Actions: click, fill (for inputs), verify_visible, verify_text, submit
-- Generate realistic selectors based on the described elements
+- "vygeneruj scenare", "generate scenarios" -> generate_scenarios
+- "vygeneruj testy", "generate tests" -> generate_tests
+- "spusti testy", "run tests" -> run_tests
+- "pridaj test id", "add test ids" -> add_test_ids
 
 Return ONLY the JSON object."""
 
         try:
-            response = self.model.generate_content(prompt)
-            scenario = self._parse_scenario(response.text)
-            return {
-                "component": component_name,
-                "scenario": scenario
-            }
-        except Exception as e:
-            return {"error": str(e)}
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt
+            )
 
-    def _parse_scenario(self, response: str) -> Dict[str, Any]:
-        """Extract scenario JSON from response"""
-        try:
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            # Parse the response
+            import re
+            text = response.text
+            json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group())
-            return json.loads(response)
-        except Exception:
-            return {"error": "Could not parse scenario"}
+                parsed = json.loads(json_match.group())
+            else:
+                parsed = json.loads(text)
 
+            intent = parsed.get("intent", "unknown")
 
-# =============================================================================
-# SYNAPSE CREW - Main Orchestrator
-# =============================================================================
+            # Execute the appropriate tool
+            if intent == "generate_scenarios":
+                project_path = parsed.get("project_path")
+                if not project_path:
+                    return "Error: Project path not specified"
+                result = generate_scenarios(project_path)
+                return self._format_result("Generate Scenarios", result)
 
-class SynapseCrew:
-    """Main orchestrator that processes voice commands"""
+            elif intent == "generate_tests":
+                scenarios_path = parsed.get("scenarios_path")
+                if not scenarios_path:
+                    return "Error: Scenarios path not specified"
+                result = generate_tests(
+                    scenarios_path,
+                    parsed.get("framework", "playwright"),
+                    parsed.get("base_url", "")
+                )
+                return self._format_result("Generate Tests", result)
 
-    def __init__(self):
-        self.parser = CommandParser()
-        self.dictator = ScenarioDictator()
+            elif intent == "run_tests":
+                test_dir = parsed.get("test_dir")
+                if not test_dir:
+                    return "Error: Test directory not specified"
+                result = run_tests(
+                    test_dir,
+                    parsed.get("base_url", ""),
+                    parsed.get("headed", False)
+                )
+                return self._format_result("Run Tests", result)
 
-    def process_command(self, voice_text: str) -> str:
-        """Process a voice command and execute the appropriate action"""
-        print(f"\n{'='*60}")
-        print(f"Processing command: {voice_text}")
-        print('='*60)
+            elif intent == "add_test_ids":
+                project_path = parsed.get("project_path")
+                if not project_path:
+                    return "Error: Project path not specified"
+                result = add_test_ids(project_path)
+                return self._format_result("Add Test IDs", result)
 
-        # Step 1: Parse the command
-        parsed = self.parser.parse_command(voice_text)
-        intent = parsed.get("intent", "unknown")
+            else:
+                return f"""Unknown command: {intent}
 
-        print(f"Detected intent: {intent}")
-        print(f"Parameters: {json.dumps(parsed, indent=2)}")
+Supported commands:
+- Generate scenarios for [project path]
+- Generate tests from [scenarios path]
+- Run tests in [test directory]
+- Add test IDs to [project path]"""
 
-        # Step 2: Execute based on intent
-        if intent == "generate_scenarios":
-            project_path = parsed.get("project_path")
-            if not project_path:
-                return "Error: Project path not specified. Please include the project path in your command."
-            result = generate_scenarios(project_path)
-            return self._format_result("Generate Scenarios", result)
-
-        elif intent == "generate_tests":
-            scenarios_path = parsed.get("scenarios_path")
-            if not scenarios_path:
-                return "Error: Scenarios path not specified. Please include the scenarios file path."
-            result = generate_tests(
-                scenarios_path,
-                parsed.get("framework", "playwright"),
-                parsed.get("base_url", "")
-            )
-            return self._format_result("Generate Tests", result)
-
-        elif intent == "run_tests":
-            test_dir = parsed.get("test_dir")
-            if not test_dir:
-                return "Error: Test directory not specified. Please include the test directory path."
-            result = run_tests(
-                test_dir,
-                parsed.get("base_url", ""),
-                parsed.get("headed", False)
-            )
-            return self._format_result("Run Tests", result)
-
-        elif intent == "add_test_ids":
-            project_path = parsed.get("project_path")
-            if not project_path:
-                return "Error: Project path not specified. Please include the project path."
-            result = add_test_ids(project_path)
-            return self._format_result("Add Test IDs", result)
-
-        elif intent == "dictate_scenario":
-            dictation = parsed.get("dictation", voice_text)
-            result = self.dictator.process_dictation(dictation)
-            return json.dumps(result, indent=2, ensure_ascii=False)
-
-        else:
-            return f"Unknown command intent: {intent}\n\nSupported commands:\n" \
-                   f"- Generate scenarios for [project path]\n" \
-                   f"- Generate tests from [scenarios path]\n" \
-                   f"- Run tests in [test directory]\n" \
-                   f"- Add test IDs to [project path]\n" \
-                   f"- Dictate scenario: [your scenario description]"
+        except Exception as e:
+            return f"Error processing command: {e}"
 
     def _format_result(self, action: str, result: Dict[str, Any]) -> str:
         """Format the result for display"""
         if result.get("status") == "success":
             output = f"{action} - SUCCESS\n"
+            output += f"  {result.get('message', '')}\n"
             for key, value in result.items():
-                if key != "status":
+                if key not in ["status", "message"]:
                     output += f"  {key}: {value}\n"
             return output
         else:
             return f"{action} - ERROR\n  {result.get('error', 'Unknown error')}"
+
+
+# For backwards compatibility
+class SynapseCrew:
+    """Wrapper for command processing"""
+
+    def __init__(self):
+        self.processor = CommandProcessor()
+
+    def process_command(self, voice_text: str) -> str:
+        print(f"\n{'='*60}")
+        print(f"Processing command: {voice_text}")
+        print('='*60)
+        return self.processor.process_command(voice_text)

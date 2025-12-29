@@ -5,11 +5,9 @@ Main entry point
 
 import argparse
 import sys
-from typing import Optional
 
 from config import config
-from voice_input import VoiceInput, VoiceStatus, VoiceResult
-from agents import SynapseCrew
+from agents import SynapseCrew, handle_tool_call
 
 
 def print_banner():
@@ -25,54 +23,27 @@ def print_banner():
 ║   ╚══════╝   ╚═╝   ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝     ╚══════╝╚══════╝ ║
 ║                                                               ║
 ║           Voice Commander for Test Automation                 ║
-║                 Powered by Gemini & CrewAI                    ║
+║              Powered by Gemini Live API                       ║
 ╚═══════════════════════════════════════════════════════════════╝
 """)
 
 
-def voice_mode(language: str = None):
-    """Run in voice command mode"""
+def live_mode():
+    """Run in live voice mode with Gemini Live API"""
     print_banner()
-    print("Voice Command Mode")
-    print("-" * 60)
 
-    voice = VoiceInput(language=language)
-    crew = SynapseCrew()
+    try:
+        from live_voice import SynapseLive
 
-    print("Calibrating microphone...")
-    voice.calibrate()
-
-    print("\nReady! Speak your command.")
-    print("Examples:")
-    print('  - "Vygeneruj testovacie scenare pre projekt company-angular"')
-    print('  - "Generate Playwright tests for the scenarios"')
-    print('  - "Run the tests against localhost:4200"')
-    print('  - "Nadiktujem scenar: klikni na submit button a over ze sa zobrazi success message"')
-    print('\nSay "stop" or "koniec" to exit.\n')
-
-    def handle_command(result: VoiceResult) -> bool:
-        """Handle a recognized voice command"""
-        print(f"\n>>> Recognized: {result.text}")
-
-        # Check for stop commands
-        stop_words = ["stop", "koniec", "exit", "quit", "ukonci"]
-        if any(word in result.text.lower() for word in stop_words):
-            print("Stopping...")
-            return False
-
-        # Process the command
-        try:
-            response = crew.process_command(result.text)
-            print(f"\n<<< Response:\n{response}")
-        except Exception as e:
-            print(f"\n<<< Error: {e}")
-
-        print("\n" + "-" * 60)
-        print("Listening for next command...")
-        return True
-
-    # Start continuous listening
-    voice.listen_continuous(handle_command, stop_phrase="stop")
+        live = SynapseLive(tool_handler=handle_tool_call)
+        live.start()
+    except ImportError as e:
+        print(f"Error: Missing dependencies for live mode: {e}")
+        print("Install with: pip install google-genai pyaudio")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error starting live mode: {e}")
+        sys.exit(1)
 
 
 def text_mode():
@@ -84,6 +55,11 @@ def text_mode():
     crew = SynapseCrew()
 
     print("Enter commands (type 'exit' to quit):\n")
+    print("Examples:")
+    print('  - "Generate scenarios for C:/Projects/company-angular"')
+    print('  - "Generate Playwright tests from result/scenarios.json"')
+    print('  - "Run tests in result/tests against localhost:4200"')
+    print()
 
     while True:
         try:
@@ -92,19 +68,19 @@ def text_mode():
             if not command:
                 continue
 
-            if command.lower() in ["exit", "quit", "stop"]:
+            if command.lower() in ["exit", "quit", "stop", "q"]:
                 print("Exiting...")
                 break
 
             # Process the command
             response = crew.process_command(command)
-            print(f"\n<<< Response:\n{response}\n")
+            print(f"\n{response}\n")
 
         except KeyboardInterrupt:
             print("\nExiting...")
             break
         except Exception as e:
-            print(f"\n<<< Error: {e}\n")
+            print(f"\nError: {e}\n")
 
 
 def single_command(command: str):
@@ -116,6 +92,23 @@ def single_command(command: str):
     print(response)
 
 
+def list_microphones():
+    """List available audio devices"""
+    try:
+        import sounddevice as sd
+
+        print("Available Audio Devices:")
+        print("-" * 60)
+        print(sd.query_devices())
+        print()
+        print(f"Default input:  {sd.query_devices(kind='input')['name']}")
+        print(f"Default output: {sd.query_devices(kind='output')['name']}")
+    except ImportError:
+        print("sounddevice not installed. Run: pip install sounddevice")
+    except Exception as e:
+        print(f"Error: {e}")
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -124,13 +117,8 @@ def main():
 
     subparsers = parser.add_subparsers(dest="mode", help="Operating mode")
 
-    # Voice mode
-    voice_parser = subparsers.add_parser("voice", help="Voice command mode")
-    voice_parser.add_argument(
-        "--language", "-l",
-        default=config.voice_language,
-        help="Voice recognition language (e.g., sk-SK, en-US)"
-    )
+    # Live mode (default)
+    live_parser = subparsers.add_parser("live", help="Live voice mode with Gemini Live API")
 
     # Text mode
     text_parser = subparsers.add_parser("text", help="Text command mode")
@@ -139,13 +127,13 @@ def main():
     cmd_parser = subparsers.add_parser("command", help="Execute single command")
     cmd_parser.add_argument("command", help="Command to execute")
 
-    # List microphones
-    mic_parser = subparsers.add_parser("mics", help="List available microphones")
+    # List audio devices
+    devices_parser = subparsers.add_parser("devices", help="List available audio devices")
 
     args = parser.parse_args()
 
-    if args.mode == "voice":
-        voice_mode(language=args.language)
+    if args.mode == "live":
+        live_mode()
 
     elif args.mode == "text":
         text_mode()
@@ -153,14 +141,11 @@ def main():
     elif args.mode == "command":
         single_command(args.command)
 
-    elif args.mode == "mics":
-        voice = VoiceInput()
-        print("Available microphones:")
-        for i, mic in enumerate(voice.list_microphones()):
-            print(f"  {i}: {mic}")
+    elif args.mode == "devices":
+        list_microphones()
 
     else:
-        # Default to text mode
+        # Default to text mode (safer than live mode)
         text_mode()
 
 
