@@ -1,0 +1,15 @@
+@{{ tags | default('regression') }}
+Feature: {{ feature_name }}
+  {{ description | default('') }}
+
+  Background:
+    {{ background | default('Given I am on the application') }}
+
+{% for scenario in scenarios %}
+  @{{ scenario.tags | default('test') }}
+  Scenario: {{ scenario.name }}
+{% for step in scenario.steps %}
+    {{ step }}
+{% endfor %}
+
+{% endfor %}

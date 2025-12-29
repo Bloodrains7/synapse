@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package marker;
+
+// Marker Service - AI-powered test ID generator
+service MarkerService {
+  // Run marker on a project (full process)
+  rpc RunMarker(RunMarkerRequest) returns (RunMarkerResponse);
+
+  // Preview changes without applying (dry-run)
+  rpc PreviewChanges(PreviewRequest) returns (PreviewResponse);
+
+  // Rollback last changes
+  rpc Rollback(RollbackRequest) returns (RollbackResponse);
+
+  // Get project analysis
+  rpc AnalyzeProject(AnalyzeRequest) returns (AnalyzeResponse);
+
+  // Stream progress updates during processing
+  rpc RunMarkerStream(RunMarkerRequest) returns (stream ProgressUpdate);
+}
+
+// Request to run marker on a project
+message RunMarkerRequest {
+  string project_path = 1;
+  bool dry_run = 2;
+  string file_filter = 3;  // Optional filter pattern
+  repeated string target_elements = 4;  // Elements to mark (button, input, etc.)
+}
+
+// Response after running marker
+message RunMarkerResponse {
+  bool success = 1;
+  int32 files_processed = 2;
+  int32 ids_added = 3;
+  repeated string duplicate_ids = 4;
+  repeated FileChange changes = 5;
+  string error_message = 6;
+}
+
+// Preview request (dry-run)
+message PreviewRequest {
+  string project_path = 1;
+  string file_filter = 2;
+}
+
+// Preview response
+message PreviewResponse {
+  bool success = 1;
+  int32 files_found = 2;
+  int32 potential_ids = 3;
+  repeated FilePreview previews = 4;
+  string error_message = 5;
+}
+
+// Rollback request
+message RollbackRequest {
+  string project_path = 1;
+}
+
+// Rollback response
+message RollbackResponse {
+  bool success = 1;
+  int32 files_restored = 2;
+  repeated string restored_files = 3;
+  string error_message = 4;
+}
+
+// Analyze project request
+message AnalyzeRequest {
+  string project_path = 1;
+}
+
+// Analyze project response
+message AnalyzeResponse {
+  bool success = 1;
+  int32 total_files = 2;
+  repeated FileInfo files = 3;
+  map<string, int32> file_types = 4;  // Extension -> count
+  string error_message = 5;
+}
+
+// Progress update during streaming
+message ProgressUpdate {
+  string file_path = 1;
+  string status = 2;  // "processing", "completed", "skipped", "error"
+  int32 ids_added = 3;
+  string message = 4;
+  float progress_percent = 5;
+}
+
+// File change info
+message FileChange {
+  string file_path = 1;
+  int32 ids_added = 2;
+  repeated ElementChange elements = 3;
+}
+
+// Element change info
+message ElementChange {
+  string element_type = 1;
+  string test_id = 2;
+  string preview = 3;
+}
+
+// File preview for dry-run
+message FilePreview {
+  string file_path = 1;
+  int32 potential_ids = 2;
+  repeated ElementChange elements = 3;
+}
+
+// File info for analysis
+message FileInfo {
+  string path = 1;
+  string component_name = 2;
+  string file_type = 3;
+  int32 existing_ids = 4;
+  int32 elements_without_ids = 5;
+}
